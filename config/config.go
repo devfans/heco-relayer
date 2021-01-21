@@ -49,6 +49,7 @@ const (
 type ServiceConfig struct {
 	PolyConfig      *PolyConfig
 	HecoConfig      *HecoConfig
+	BridgeUrl       []string
 	BoltDbPath      string
 	RoutineNum      int64
 	TargetContracts []map[string]map[string][]uint64

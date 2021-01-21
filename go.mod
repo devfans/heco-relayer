@@ -5,7 +5,6 @@ go 1.14
 require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/btcsuite/btcd v0.20.1-beta
-	github.com/cmars/basen v0.0.0-20150613233007-fe3947df716e // indirect
 	github.com/ethereum/go-ethereum v1.9.15
 	github.com/ontio/ontology v1.11.0
 	github.com/ontio/ontology-crypto v1.0.9
@@ -15,4 +14,5 @@ require (
 	github.com/stretchr/testify v1.5.1
 	github.com/urfave/cli v1.22.4
 	launchpad.net/gocheck v0.0.0-20140225173054-000000000087 // indirect
+	poly-bridge v0.0.0-00010101000000-000000000000
 )
