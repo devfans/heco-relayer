@@ -9,10 +9,12 @@ require (
 	github.com/ontio/ontology v1.11.0
 	github.com/ontio/ontology-crypto v1.0.9
 	github.com/polynetwork/eth-contracts v0.0.0-20210115031323-d16252b2b857
-	github.com/polynetwork/poly v0.0.0-20200722075529-eea88acb37b2
-	github.com/polynetwork/poly-go-sdk v0.0.0-20200729103825-af447ef53ef0
-	github.com/stretchr/testify v1.5.1
+	github.com/polynetwork/poly v1.3.1-0.20210115104304-aa006115a87d
+	github.com/polynetwork/poly-go-sdk v0.0.0-20210114120411-3dcba035134f
+	github.com/stretchr/testify v1.6.1
 	github.com/urfave/cli v1.22.4
 	launchpad.net/gocheck v0.0.0-20140225173054-000000000087 // indirect
 	poly-bridge v0.0.0-00010101000000-000000000000
 )
+
+replace poly-bridge => github.com/polynetwork/poly-bridge v0.0.0-20210108054753-c3ba2b01fdb7
