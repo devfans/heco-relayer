@@ -184,7 +184,7 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 
 		senders[i] = v
 	}
-	sdk := bridgesdk.NewBridgeSdkPro(servCfg.BridgeUrl, 5)
+	bridgeSdk := bridgesdk.NewBridgeSdkPro(servCfg.BridgeUrl, 5)
 	return &PolyManager{
 		exitChan:      make(chan int),
 		config:        servCfg,
@@ -194,7 +194,7 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 		db:            boltDB,
 		ethClient:     ethereumsdk,
 		senders:       senders,
-		bridgeSdk:     sdk,
+		bridgeSdk:     bridgeSdk,
 	}, nil
 }
 
@@ -478,10 +478,13 @@ func (this *PolyManager) handleLockDepositEvents() error {
 		}
 		bridgeTransactions[k] = bridgeTransaction
 	}
-	noCheckFees := make([]string, 0)
+	noCheckFees := make([]*bridgesdk.CheckFeeReq, 0)
 	for k, v := range bridgeTransactions {
 		if v.hasPay == FEE_NOCHECK {
-			noCheckFees = append(noCheckFees, k)
+			noCheckFees = append(noCheckFees, &bridgesdk.CheckFeeReq{
+				ChainId: v.param.FromChainID,
+				Hash:    k,
+			})
 		}
 	}
 	if len(noCheckFees) > 0 {
@@ -496,10 +499,10 @@ func (this *PolyManager) handleLockDepositEvents() error {
 				}
 				item, ok := bridgeTransactions[checkfee.Hash]
 				if ok {
-					if checkfee.HasPay == true {
+					if checkfee.PayState == bridgesdk.STATE_HASPAY {
 						item.hasPay = FEE_HASPAY
 						item.fee = checkfee.Amount
-					} else {
+					} else if checkfee.PayState == bridgesdk.STATE_NOTPAY {
 						item.hasPay = FEE_NOTPAY
 					}
 				}
@@ -509,14 +512,16 @@ func (this *PolyManager) handleLockDepositEvents() error {
 	for k, v := range bridgeTransactions {
 		if v.hasPay == FEE_NOTPAY {
 			this.db.DeleteBridgeTransactions(k)
+			log.Infof("tx (src %d, %s, poly %s) has not pay proxy fee, ignore it, payed: %s",
+				v.param.FromChainID, hex.EncodeToString(v.param.MakeTxParam.TxHash), v.polyTxHash, v.fee)
 			delete(bridgeTransactions, k)
 		}
 	}
 	var maxFeeOfTransaction *BridgeTransaction = nil
-	maxFee := new(big.Int).SetUint64(0)
+	maxFee := new(big.Float).SetUint64(0)
 	maxFeeOfTxHash := ""
 	for k, v := range bridgeTransactions {
-		fee, ok := new(big.Int).SetString(v.fee, 10)
+		fee, ok := new(big.Float).SetString(v.fee)
 		if ok != true {
 			continue
 		}
@@ -528,7 +533,7 @@ func (this *PolyManager) handleLockDepositEvents() error {
 	}
 	if maxFeeOfTransaction != nil {
 		sender := this.selectSender()
-		log.Infof("sender %s is handling poly tx ( hash: %s)", sender.acc.Address.String(), maxFeeOfTransaction.param.TxHash)
+		log.Infof("sender %s is handling poly tx ( hash: %x)", sender.acc.Address.String(), maxFeeOfTransaction.param.TxHash)
 		res := sender.commitDepositEventsWithHeader(maxFeeOfTransaction.header, maxFeeOfTransaction.param, maxFeeOfTransaction.headerProof,
 			maxFeeOfTransaction.anchorHeader, hex.EncodeToString(maxFeeOfTransaction.param.TxHash), maxFeeOfTransaction.rawAuditPath)
 		if res == true {
@@ -544,8 +549,8 @@ func (this *PolyManager) handleLockDepositEvents() error {
 	return nil
 }
 
-func (this *PolyManager) checkFee(hashs []string) ([]*bridgesdk.CheckFeeRsp, error) {
-	return this.bridgeSdk.CheckFee(hashs)
+func (this *PolyManager) checkFee(checks []*bridgesdk.CheckFeeReq) ([]*bridgesdk.CheckFeeRsp, error) {
+	return this.bridgeSdk.CheckFee(checks)
 }
 
 func (this *PolyManager) Stop() {
