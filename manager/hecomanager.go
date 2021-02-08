@@ -349,7 +349,7 @@ func (this *HecoManager) commitHecoHeaderToPoly() int {
 	)
 	if err != nil {
 		errDesc := err.Error()
-		if strings.Contains(errDesc, "get the parent block failed") || strings.Contains(errDesc, "missing required field") {
+		if strings.Contains(errDesc, "parent header not exist") || strings.Contains(errDesc, "missing required field") {
 			log.Warnf("commitHeader - send transaction to poly chain err: %s", errDesc)
 			this.rollBackToCommAncestor()
 			return 0
