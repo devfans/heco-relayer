@@ -140,6 +140,7 @@ type PolyManager struct {
 	ethClient     *ethclient.Client
 	senders       []*EthSender
 	bridgeSdk     *bridgesdk.BridgeSdkPro
+	eccdInstance  *eccd_abi.EthCrossChainData
 }
 
 func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, polySdk *sdk.PolySdk, ethereumsdk *ethclient.Client, boltDB *db.BoltDB) (*PolyManager, error) {
@@ -185,6 +186,12 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 		senders[i] = v
 	}
 	bridgeSdk := bridgesdk.NewBridgeSdkPro(servCfg.BridgeUrl, 5)
+	address := ethcommon.HexToAddress(servCfg.HecoConfig.ECCDContractAddress)
+	instance, err := eccd_abi.NewEthCrossChainData(address, ethereumsdk)
+	if err != nil {
+		log.Errorf("NewPolyManager - new eth cross chain failed: %s", err.Error())
+		return nil, fmt.Errorf("new eccd instance from abi error")
+	}
 	return &PolyManager{
 		exitChan:      make(chan int),
 		config:        servCfg,
@@ -195,17 +202,12 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 		ethClient:     ethereumsdk,
 		senders:       senders,
 		bridgeSdk:     bridgeSdk,
+		eccdInstance:  instance,
 	}, nil
 }
 
 func (this *PolyManager) findLatestHeight() uint32 {
-	address := ethcommon.HexToAddress(this.config.HecoConfig.ECCDContractAddress)
-	instance, err := eccd_abi.NewEthCrossChainData(address, this.ethClient)
-	if err != nil {
-		log.Errorf("findLatestHeight - new eth cross chain failed: %s", err.Error())
-		return 0
-	}
-	height, err := instance.GetCurEpochStartHeight(nil)
+	height, err := this.eccdInstance.GetCurEpochStartHeight(nil)
 	if err != nil {
 		log.Errorf("findLatestHeight - GetLatestHeight failed: %s", err.Error())
 		return 0
@@ -260,6 +262,9 @@ func (this *PolyManager) MonitorPolyChain() {
 					break
 				}
 				this.currentHeight++
+				if this.currentHeight%1000 == 0 {
+					break
+				}
 			}
 			if err = this.db.UpdatePolyHeight(this.currentHeight - 1); err != nil {
 				log.Errorf("MonitorChain - failed to save height of poly: %v", err)

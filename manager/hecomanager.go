@@ -508,6 +508,7 @@ func (this *HecoManager) parserValue(value []byte) []byte {
 }
 func (this *HecoManager) CheckDeposit() {
 	checkTicker := time.NewTicker(time.Duration(this.config.HecoConfig.MonitorInterval) * time.Second)
+	defer checkTicker.Stop()
 	for {
 		select {
 		case <-checkTicker.C:
