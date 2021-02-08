@@ -166,12 +166,12 @@ func (this *HecoManager) MonitorHecoChain() {
 				log.Infof("MonitorChain - cannot get node height, err: %s", err)
 				continue
 			}
-			if height-this.currentHeight <= config.HECO_USEFUL_BLOCK_NUM {
+			if height-this.currentHeight <= this.config.HecoConfig.BlockConfig {
 				continue
 			}
 			log.Infof("MonitorChain - heco height is %d", height)
 			blockHandleResult = true
-			for this.currentHeight < height-config.HECO_USEFUL_BLOCK_NUM {
+			for this.currentHeight < height-this.config.HecoConfig.BlockConfig {
 				if this.currentHeight%10 == 0 {
 					log.Infof("handle new heco Block height: %d", this.currentHeight)
 				}
