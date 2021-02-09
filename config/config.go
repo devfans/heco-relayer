@@ -70,6 +70,7 @@ type HecoConfig struct {
 	KeyStorePath           string
 	KeyStorePwdSet         map[string]string
 	BlockConfig            uint64
+	CommitProofBlockConfig uint64 // heco chain should be 21, value should be always >= 21 for heco
 	HeadersPerBatch        int
 	MonitorInterval        uint64
 	EnableChangeBookKeeper bool
