@@ -166,12 +166,12 @@ func (this *HecoManager) MonitorHecoChain() {
 				log.Infof("MonitorChain - cannot get node height, err: %s", err)
 				continue
 			}
-			if height-this.currentHeight <= this.config.HecoConfig.CommitProofBlockConfig {
+			if height-this.currentHeight <= this.config.HecoConfig.BlockConfig {
 				continue
 			}
 			log.Infof("MonitorChain - heco height is %d", height)
 			blockHandleResult = true
-			for this.currentHeight < height-this.config.HecoConfig.CommitProofBlockConfig {
+			for this.currentHeight < height-this.config.HecoConfig.BlockConfig {
 				if this.currentHeight%10 == 0 {
 					log.Infof("handle new heco Block height: %d", this.currentHeight)
 				}
@@ -437,10 +437,10 @@ func (this *HecoManager) handleCachedLockDepositEvents(refHeight uint64) error {
 			log.Errorf("handleCachedLockDepositEvents - MappingKeyAt error:%s\n", err.Error())
 			continue
 		}
-		if refHeight <= crosstx.height+this.config.HecoConfig.BlockConfig {
+		if refHeight <= crosstx.height+this.config.HecoConfig.CommitProofBlockConfig {
 			continue
 		}
-		height := int64(refHeight - this.config.HecoConfig.BlockConfig)
+		height := int64(refHeight - this.config.HecoConfig.CommitProofBlockConfig)
 		heightHex := hexutil.EncodeBig(big.NewInt(height))
 		proofKey := hexutil.Encode(keyBytes)
 		//2. get proof
