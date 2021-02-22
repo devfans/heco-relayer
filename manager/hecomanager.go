@@ -237,7 +237,7 @@ func (this *HecoManager) findLastestHeight() uint64 {
 func (this *HecoManager) CheckIfCommitedToPolyAndParseLockDepositEvent(height uint64) bool {
 	ret := this.handleBlockHeader(height)
 	if !ret {
-		log.Errorf("handleNewBlock - handleBlockHeader on height :%d failed", height)
+		log.Warnf("handleNewBlock - handleBlockHeader on height :%d failed, retrying", height)
 		return false
 	}
 	ret = this.fetchLockDepositEvents(height, this.client)
@@ -250,7 +250,7 @@ func (this *HecoManager) CheckIfCommitedToPolyAndParseLockDepositEvent(height ui
 func (this *HecoManager) handleBlockHeader(height uint64) bool {
 	hdr, err := this.client.HeaderByNumber(context.Background(), big.NewInt(int64(height)))
 	if err != nil {
-		log.Errorf("handleBlockHeader - GetNodeHeader on height :%d failed", height)
+		log.Warnf("handleBlockHeader - GetNodeHeader on height :%d failed, retrying", height)
 		return false
 	}
 	rawHdr, _ := hdr.MarshalJSON()
@@ -410,6 +410,10 @@ func (this *HecoManager) RegularlyTryCommitHecoLockProofToPoly() {
 				continue
 			}
 			snycheight := this.findLastestHeight()
+			if height < snycheight {
+				log.Warnf("heco node latest height: %d lower than poly synced height: %d, retry fetch heco node height", height, snycheight)
+				continue
+			}
 			log.Log.Info("MonitorDeposit from heco - snyced heco height", snycheight, "heco height", height, "diff", height-snycheight)
 			this.handleCachedLockDepositEvents(snycheight)
 		case <-this.exitChan:
