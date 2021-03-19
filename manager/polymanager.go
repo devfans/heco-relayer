@@ -22,6 +22,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"math/rand"
+	"poly-bridge/bridgesdk"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	ethcommon "github.com/ethereum/go-ethereum/common"
@@ -38,14 +45,8 @@ import (
 	sdk "github.com/polynetwork/poly-go-sdk"
 	"github.com/polynetwork/poly/common"
 	"github.com/polynetwork/poly/common/password"
-	"github.com/polynetwork/poly/consensus/vbft/config"
+	vconfig "github.com/polynetwork/poly/consensus/vbft/config"
 	common2 "github.com/polynetwork/poly/native/service/cross_chain_manager/common"
-	"math/big"
-	"math/rand"
-	"poly-bridge/bridgesdk"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/polynetwork/heco_relayer/tools"
@@ -583,22 +584,27 @@ func (this *EthSender) sendTxToEth(info *EthTxInfo) error {
 		this.nonceManager.ReturnNonce(this.acc.Address, nonce)
 		return fmt.Errorf("commitDepositEventsWithHeader - sign raw tx error and return nonce %d: %v", nonce, err)
 	}
-	err = this.ethClient.SendTransaction(context.Background(), signedtx)
-	if err != nil {
-		this.nonceManager.ReturnNonce(this.acc.Address, nonce)
-		return fmt.Errorf("commitDepositEventsWithHeader - send transaction error and return nonce %d: %v", nonce, err)
-	}
-	hash := signedtx.Hash()
 
-	isSuccess := this.waitTransactionConfirm(info.polyTxHash, hash)
-	if isSuccess {
-		log.Infof("successful to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
-			hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
-	} else {
+	for {
+		err = this.ethClient.SendTransaction(context.Background(), signedtx)
+		if err != nil {
+			log.Errorf("poly to bsc SendTransaction error: %v, nonce %d", err, nonce)
+		}
+		hash := signedtx.Hash()
+
+		isSuccess := this.waitTransactionConfirm(info.polyTxHash, hash)
+		if isSuccess {
+			log.Infof("successful to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
+				hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
+			return nil
+		}
+
 		log.Errorf("failed to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
 			hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
+
+		time.Sleep(time.Second)
 	}
-	return nil
+
 }
 
 func (this *EthSender) commitDepositEventsWithHeader(header *polytypes.Header, param *common2.ToMerkleValue, headerProof string, anchorHeader *polytypes.Header, polyTxHash string, rawAuditPath []byte) bool {

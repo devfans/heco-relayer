@@ -12,3 +12,4 @@ config-main.json
 config-debug-dev.json
 config_*.json
 *_relayer
+.vscode
