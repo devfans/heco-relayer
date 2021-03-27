@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
-	"poly-bridge/bridgesdk"
+	"poly_bridge_sdk"
 	"strconv"
 	"strings"
 	"time"
@@ -140,7 +140,7 @@ type PolyManager struct {
 	db            *db.BoltDB
 	ethClient     *ethclient.Client
 	senders       []*EthSender
-	bridgeSdk     *bridgesdk.BridgeSdkPro
+	bridgeSdk     *poly_bridge_sdk.BridgeFeeCheck
 	eccdInstance  *eccd_abi.EthCrossChainData
 }
 
@@ -186,7 +186,7 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 
 		senders[i] = v
 	}
-	bridgeSdk := bridgesdk.NewBridgeSdkPro(servCfg.BridgeUrl, 5)
+	bridgeSdk := poly_bridge_sdk.NewBridgeFeeCheck(servCfg.BridgeUrl, 5)
 	address := ethcommon.HexToAddress(servCfg.HecoConfig.ECCDContractAddress)
 	instance, err := eccd_abi.NewEthCrossChainData(address, ethereumsdk)
 	if err != nil {
@@ -484,10 +484,10 @@ func (this *PolyManager) handleLockDepositEvents() error {
 		}
 		bridgeTransactions[k] = bridgeTransaction
 	}
-	noCheckFees := make([]*bridgesdk.CheckFeeReq, 0)
+	noCheckFees := make([]*poly_bridge_sdk.CheckFeeReq, 0)
 	for k, v := range bridgeTransactions {
 		if v.hasPay == FEE_NOCHECK {
-			noCheckFees = append(noCheckFees, &bridgesdk.CheckFeeReq{
+			noCheckFees = append(noCheckFees, &poly_bridge_sdk.CheckFeeReq{
 				ChainId: v.param.FromChainID,
 				Hash:    k,
 			})
@@ -505,10 +505,10 @@ func (this *PolyManager) handleLockDepositEvents() error {
 				}
 				item, ok := bridgeTransactions[checkfee.Hash]
 				if ok {
-					if checkfee.PayState == bridgesdk.STATE_HASPAY {
+					if checkfee.PayState == poly_bridge_sdk.STATE_HASPAY {
 						item.hasPay = FEE_HASPAY
 						item.fee = checkfee.Amount
-					} else if checkfee.PayState == bridgesdk.STATE_NOTPAY {
+					} else if checkfee.PayState == poly_bridge_sdk.STATE_NOTPAY {
 						item.hasPay = FEE_NOTPAY
 					}
 				}
@@ -555,7 +555,7 @@ func (this *PolyManager) handleLockDepositEvents() error {
 	return nil
 }
 
-func (this *PolyManager) checkFee(checks []*bridgesdk.CheckFeeReq) ([]*bridgesdk.CheckFeeRsp, error) {
+func (this *PolyManager) checkFee(checks []*poly_bridge_sdk.CheckFeeReq) ([]*poly_bridge_sdk.CheckFeeRsp, error) {
 	return this.bridgeSdk.CheckFee(checks)
 }
 
