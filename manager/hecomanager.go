@@ -341,6 +341,7 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 }
 
 func (this *HecoManager) commitHecoHeaderToPoly() int {
+	start := time.Now()
 	tx, err := this.polySdk.Native.Hs.SyncBlockHeader(
 		this.config.HecoConfig.SideChainId,
 		this.polySigner.Address,
@@ -358,20 +359,16 @@ func (this *HecoManager) commitHecoHeaderToPoly() int {
 			return 1
 		}
 	}
-	timeOutCount := 0
-	tick := time.NewTicker(100 * time.Millisecond)
+	
 	var h uint32
-	for range tick.C {
+	for  {
 		h, _ = this.polySdk.GetBlockHeightByTxHash(tx.ToHexString())
 		curr, _ := this.polySdk.GetCurrentBlockHeight()
 		if h > 0 && curr > h {
 			break
 		}
-		timeOutCount++
-		if timeOutCount > 1000 {
-			log.Errorf("commitHeader, GetBlockHeightByHash(tx:%s) timeout, alert", tx.ToHexString())
-			break
-		}
+		log.Infof("HecoManager SyncBlockHeader wait duration %s", time.Now().Sub(start).String())
+		time.Sleep(time.Second)
 	}
 	log.Infof("commitHeader - send transaction %s to poly chain and confirmed on height %d", tx.ToHexString(), h)
 	this.header4sync = make([][]byte, 0)
