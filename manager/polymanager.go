@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"os"
 	"poly_bridge_sdk"
 	"strconv"
 	"strings"
@@ -588,7 +589,8 @@ func (this *EthSender) sendTxToEth(info *EthTxInfo) error {
 	for {
 		err = this.ethClient.SendTransaction(context.Background(), signedtx)
 		if err != nil {
-			log.Errorf("poly to bsc SendTransaction error: %v, nonce %d", err, nonce)
+			log.Errorf("poly to heco SendTransaction error: %v, nonce %d", err, nonce)
+			os.Exit(1)
 		}
 		hash := signedtx.Hash()
 
