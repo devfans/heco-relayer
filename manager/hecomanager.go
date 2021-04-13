@@ -21,6 +21,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -29,11 +33,9 @@ import (
 	"github.com/polynetwork/heco_relayer/config"
 	"github.com/polynetwork/heco_relayer/db"
 	common2 "github.com/polynetwork/poly/native/service/cross_chain_manager/common"
-	"math/big"
-	"strings"
-	"time"
 
 	"context"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/polynetwork/heco_relayer/log"
 	"github.com/polynetwork/heco_relayer/tools"
@@ -240,10 +242,15 @@ func (this *HecoManager) CheckIfCommitedToPolyAndParseLockDepositEvent(height ui
 		log.Warnf("handleNewBlock - handleBlockHeader on height :%d failed, retrying", height)
 		return false
 	}
-	ret = this.fetchLockDepositEvents(height, this.client)
-	if !ret {
-		log.Errorf("handleNewBlock - fetchLockDepositEvents on height :%d failed", height)
+	for {
+		ret = this.fetchLockDepositEvents(height, this.client)
+		if !ret {
+			log.Errorf("handleNewBlock - fetchLockDepositEvents on height :%d failed", height)
+			continue
+		}
+		break
 	}
+
 	return true
 }
 
@@ -359,9 +366,9 @@ func (this *HecoManager) commitHecoHeaderToPoly() int {
 			return 1
 		}
 	}
-	
+
 	var h uint32
-	for  {
+	for {
 		h, _ = this.polySdk.GetBlockHeightByTxHash(tx.ToHexString())
 		curr, _ := this.polySdk.GetCurrentBlockHeight()
 		if h > 0 && curr > h {
