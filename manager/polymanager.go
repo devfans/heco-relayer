@@ -504,6 +504,7 @@ func (this *PolyManager) handleLockDepositEvents() error {
 				if checkfee.Error != "" {
 					continue
 				}
+				checkfee.PayState = FEE_HASPAY
 				item, ok := bridgeTransactions[checkfee.Hash]
 				if ok {
 					if checkfee.PayState == poly_bridge_sdk.STATE_HASPAY {
