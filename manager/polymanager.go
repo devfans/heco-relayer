@@ -55,7 +55,7 @@ import (
 )
 
 const (
-	ChanLen = 64
+	ChanLen = 1
 )
 const (
 	FEE_NOCHECK = iota
