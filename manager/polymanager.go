@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
-	"os"
 	"poly_bridge_sdk"
 	"strconv"
 	"strings"
@@ -591,7 +590,8 @@ func (this *EthSender) sendTxToEth(info *EthTxInfo) error {
 		err = this.ethClient.SendTransaction(context.Background(), signedtx)
 		if err != nil {
 			log.Errorf("poly to heco SendTransaction error: %v, nonce %d", err, nonce)
-			os.Exit(1)
+			time.Sleep(time.Second)
+			continue
 		}
 		hash := signedtx.Hash()
 
@@ -605,7 +605,7 @@ func (this *EthSender) sendTxToEth(info *EthTxInfo) error {
 		log.Errorf("failed to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
 			hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
 
-		time.Sleep(time.Second)
+		return nil
 	}
 
 }
