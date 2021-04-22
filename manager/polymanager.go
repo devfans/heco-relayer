@@ -532,7 +532,7 @@ func (this *PolyManager) handleLockDepositEvents() error {
 		if ok != true {
 			continue
 		}
-		if v.hasPay == FEE_HASPAY && fee.Cmp(maxFee) > 0 {
+		if v.hasPay == FEE_HASPAY || fee.Cmp(maxFee) > 0 {
 			maxFee = fee
 			maxFeeOfTransaction = v
 			maxFeeOfTxHash = k
