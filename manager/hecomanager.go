@@ -21,6 +21,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -29,11 +33,9 @@ import (
 	"github.com/polynetwork/heco_relayer/config"
 	"github.com/polynetwork/heco_relayer/db"
 	common2 "github.com/polynetwork/poly/native/service/cross_chain_manager/common"
-	"math/big"
-	"strings"
-	"time"
 
 	"context"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/polynetwork/heco_relayer/log"
 	"github.com/polynetwork/heco_relayer/tools"
@@ -102,6 +104,7 @@ type HecoManager struct {
 	header4sync    [][]byte
 	crosstx4sync   []*CrossTransfer
 	db             *db.BoltDB
+	skippedSenders map[ethcommon.Address]bool
 }
 
 func NewHecoManager(servconfig *config.ServiceConfig, startheight uint64, startforceheight uint64, ontsdk *sdk.PolySdk, client *ethclient.Client, boltDB *db.BoltDB) (*HecoManager, error) {
@@ -134,18 +137,27 @@ func NewHecoManager(servconfig *config.ServiceConfig, startheight uint64, startf
 	}
 	log.Infof("NewHecoManager - poly address: %s", signer.Address.ToBase58())
 
+	skippedSenders := map[ethcommon.Address]bool{}
+	if servconfig.HecoConfig != nil {
+		for _, s := range servconfig.HecoConfig.SkippedSenders {
+			address := ethcommon.HexToAddress(s)
+			skippedSenders[address] = true
+		}
+	}
+
 	mgr := &HecoManager{
-		config:        servconfig,
-		exitChan:      make(chan int),
-		currentHeight: startheight,
-		forceHeight:   startforceheight,
-		restClient:    tools.NewRestClient(),
-		client:        client,
-		polySdk:       ontsdk,
-		polySigner:    signer,
-		header4sync:   make([][]byte, 0),
-		crosstx4sync:  make([]*CrossTransfer, 0),
-		db:            boltDB,
+		config:         servconfig,
+		exitChan:       make(chan int),
+		currentHeight:  startheight,
+		forceHeight:    startforceheight,
+		restClient:     tools.NewRestClient(),
+		client:         client,
+		polySdk:        ontsdk,
+		polySigner:     signer,
+		header4sync:    make([][]byte, 0),
+		crosstx4sync:   make([]*CrossTransfer, 0),
+		db:             boltDB,
+		skippedSenders: skippedSenders,
 	}
 	err = mgr.init()
 	if err != nil {
@@ -305,6 +317,14 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 				continue
 			}
 		}
+
+		// Filter skipped senders
+		_, skipped := this.skippedSenders[evt.Sender]
+		if skipped {
+			log.Infof("Skipped cross chain sender %s", evt.Sender)
+			continue
+		}
+
 		param := &common2.MakeTxParam{}
 		_ = param.Deserialization(common.NewZeroCopySource([]byte(evt.Rawdata)))
 		raw, _ := this.polySdk.GetStorage(autils.CrossChainManagerContractAddress.ToHexString(),

@@ -72,6 +72,7 @@ type HecoConfig struct {
 	HeadersPerBatch        int
 	MonitorInterval        uint64
 	EnableChangeBookKeeper bool
+	SkippedSenders         []string
 }
 
 type ONTConfig struct {

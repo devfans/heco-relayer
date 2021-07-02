@@ -16,7 +16,3 @@ require (
 	github.com/urfave/cli v1.22.4
 	launchpad.net/gocheck v0.0.0-20140225173054-000000000087 // indirect
 )
-
-replace (
-	github.com/polynetwork/eth-contracts v0.0.0-20200903021827-c9212e419943 => ./../eth-contracts
-)
