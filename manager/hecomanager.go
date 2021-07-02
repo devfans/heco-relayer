@@ -140,6 +140,7 @@ func NewHecoManager(servconfig *config.ServiceConfig, startheight uint64, startf
 	skippedSenders := map[ethcommon.Address]bool{}
 	if servconfig.HecoConfig != nil {
 		for _, s := range servconfig.HecoConfig.SkippedSenders {
+			log.Infof("Skipped sender address: %s", s)
 			address := ethcommon.HexToAddress(s)
 			skippedSenders[address] = true
 		}
