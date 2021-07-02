@@ -16,5 +16,3 @@ require (
 	launchpad.net/gocheck v0.0.0-20140225173054-000000000087 // indirect
 	poly_bridge_sdk v0.0.0-00010101000000-000000000000
 )
-
-replace poly_bridge_sdk => github.com/blockchain-develop/poly_bridge_sdk v0.0.0-20210327080022-0e6eb4b31700
