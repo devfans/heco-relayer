@@ -338,7 +338,15 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 		}
 
 		param := &common2.MakeTxParam{}
-		_ = param.Deserialization(common.NewZeroCopySource([]byte(evt.Rawdata)))
+		err = param.Deserialization(common.NewZeroCopySource([]byte(evt.Rawdata)))
+		if err != nil {
+			log.Errorf("param.Deserialization error %v", err)
+			continue
+		}
+		if param.Method != "unlock" {
+			log.Errorf("target contract method invalid %s", param.Method)
+			continue
+		}
 		raw, _ := this.polySdk.GetStorage(autils.CrossChainManagerContractAddress.ToHexString(),
 			append(append([]byte(cross_chain_manager.DONE_TX), autils.GetUint64Bytes(this.config.HecoConfig.SideChainId)...), param.CrossChainID...))
 		if len(raw) != 0 {
