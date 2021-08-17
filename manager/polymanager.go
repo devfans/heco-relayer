@@ -373,7 +373,7 @@ func (this *PolyManager) handleDepositEvents(height uint32) bool {
 					continue
 				}
 				if !METHODS[param.MakeTxParam.Method] {
-					log.Errorf("Invalid target contract method %s", param.MakeTxParam.Method)
+					log.Errorf("Invalid target contract method %s %s", param.MakeTxParam.Method, event.TxHash)
 					continue
 				}
 				var isTarget bool

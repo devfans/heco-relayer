@@ -355,7 +355,7 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 			continue
 		}
 		if !METHODS[param.Method] {
-			log.Errorf("target contract method invalid %s", param.Method)
+			log.Errorf("target contract method invalid %s %s", param.Method, string(evt.Raw.TxHash.Bytes()))
 			continue
 		}
 		raw, _ := this.polySdk.GetStorage(autils.CrossChainManagerContractAddress.ToHexString(),
