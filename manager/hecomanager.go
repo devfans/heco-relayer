@@ -46,6 +46,17 @@ import (
 	autils "github.com/polynetwork/poly/native/service/utils"
 )
 
+var METHODS = map[string]bool{
+	"add":             true,
+	"remove":          true,
+	"swap":            true,
+	"unlock":          true,
+	"addExtension":    true,
+	"removeExtension": true,
+	"registerAsset":   true,
+	"onCrossTransfer": true,
+}
+
 type CrossTransfer struct {
 	txIndex string
 	txId    []byte
@@ -343,7 +354,7 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 			log.Errorf("param.Deserialization error %v", err)
 			continue
 		}
-		if param.Method != "unlock" {
+		if !METHODS[param.Method] {
 			log.Errorf("target contract method invalid %s", param.Method)
 			continue
 		}
