@@ -73,6 +73,13 @@ type BridgeTransaction struct {
 	fee          string
 }
 
+func CheckGasLimit(hash string, limit uint64) error {
+	if limit > 300000 {
+		return fmt.Errorf("Skipping poly tx %s for gas limit too high %d ", hash, limit)
+	}
+	return nil
+}
+
 func (this *BridgeTransaction) Serialization(sink *common.ZeroCopySink) {
 	this.header.Serialization(sink)
 	this.param.Serialization(sink)
@@ -676,6 +683,13 @@ func (this *EthSender) commitDepositEventsWithHeader(header *polytypes.Header, p
 	if err != nil {
 		log.Errorf("commitDepositEventsWithHeader - estimate gas limit error: %s", err.Error())
 		return false
+	}
+
+	// Check gas limit
+	gasLimit = uint64(float32(gasLimit) * 1.1)
+	if e := CheckGasLimit(polyTxHash, gasLimit); e != nil {
+		log.Errorf("Skipped poly tx %s for gas limit too high %v", polyTxHash, gasLimit)
+		return true
 	}
 
 	k := this.getRouter()
