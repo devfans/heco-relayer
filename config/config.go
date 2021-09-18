@@ -30,7 +30,7 @@ import (
 const (
 	POLY_MONITOR_INTERVAL = 1 * time.Second
 
-	HECO_USEFUL_BLOCK_NUM    = 1
+	HECO_USEFUL_BLOCK_NUM    = 20
 	POLY_USEFUL_BLOCK_NUM    = 1
 	DEFAULT_CONFIG_FILE_NAME = "./config.json"
 	Version                  = "1.0"
@@ -49,6 +49,7 @@ const (
 type ServiceConfig struct {
 	PolyConfig      *PolyConfig
 	HecoConfig      *HecoConfig
+	BridgeUrl       [][]string
 	BoltDbPath      string
 	RoutineNum      int64
 	TargetContracts []map[string]map[string][]uint64
@@ -69,9 +70,11 @@ type HecoConfig struct {
 	KeyStorePath           string
 	KeyStorePwdSet         map[string]string
 	BlockConfig            uint64
+	CommitProofBlockConfig uint64 // heco chain should be 21, value should be always >= 21 for heco
 	HeadersPerBatch        int
 	MonitorInterval        uint64
 	EnableChangeBookKeeper bool
+	SkippedSenders         []string
 }
 
 type ONTConfig struct {

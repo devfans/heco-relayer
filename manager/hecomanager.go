@@ -21,6 +21,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	ethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -29,11 +33,9 @@ import (
 	"github.com/polynetwork/heco_relayer/config"
 	"github.com/polynetwork/heco_relayer/db"
 	common2 "github.com/polynetwork/poly/native/service/cross_chain_manager/common"
-	"math/big"
-	"strings"
-	"time"
 
 	"context"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/polynetwork/heco_relayer/log"
 	"github.com/polynetwork/heco_relayer/tools"
@@ -43,6 +45,17 @@ import (
 	scom "github.com/polynetwork/poly/native/service/header_sync/common"
 	autils "github.com/polynetwork/poly/native/service/utils"
 )
+
+var METHODS = map[string]bool{
+	"add":             true,
+	"remove":          true,
+	"swap":            true,
+	"unlock":          true,
+	"addExtension":    true,
+	"removeExtension": true,
+	"registerAsset":   true,
+	"onCrossTransfer": true,
+}
 
 type CrossTransfer struct {
 	txIndex string
@@ -102,6 +115,7 @@ type HecoManager struct {
 	header4sync    [][]byte
 	crosstx4sync   []*CrossTransfer
 	db             *db.BoltDB
+	skippedSenders map[ethcommon.Address]bool
 }
 
 func NewHecoManager(servconfig *config.ServiceConfig, startheight uint64, startforceheight uint64, ontsdk *sdk.PolySdk, client *ethclient.Client, boltDB *db.BoltDB) (*HecoManager, error) {
@@ -134,18 +148,28 @@ func NewHecoManager(servconfig *config.ServiceConfig, startheight uint64, startf
 	}
 	log.Infof("NewHecoManager - poly address: %s", signer.Address.ToBase58())
 
+	skippedSenders := map[ethcommon.Address]bool{}
+	if servconfig.HecoConfig != nil {
+		for _, s := range servconfig.HecoConfig.SkippedSenders {
+			log.Infof("Skipped sender address: %s", s)
+			address := ethcommon.HexToAddress(s)
+			skippedSenders[address] = true
+		}
+	}
+
 	mgr := &HecoManager{
-		config:        servconfig,
-		exitChan:      make(chan int),
-		currentHeight: startheight,
-		forceHeight:   startforceheight,
-		restClient:    tools.NewRestClient(),
-		client:        client,
-		polySdk:       ontsdk,
-		polySigner:    signer,
-		header4sync:   make([][]byte, 0),
-		crosstx4sync:  make([]*CrossTransfer, 0),
-		db:            boltDB,
+		config:         servconfig,
+		exitChan:       make(chan int),
+		currentHeight:  startheight,
+		forceHeight:    startforceheight,
+		restClient:     tools.NewRestClient(),
+		client:         client,
+		polySdk:        ontsdk,
+		polySigner:     signer,
+		header4sync:    make([][]byte, 0),
+		crosstx4sync:   make([]*CrossTransfer, 0),
+		db:             boltDB,
+		skippedSenders: skippedSenders,
 	}
 	err = mgr.init()
 	if err != nil {
@@ -166,12 +190,12 @@ func (this *HecoManager) MonitorHecoChain() {
 				log.Infof("MonitorChain - cannot get node height, err: %s", err)
 				continue
 			}
-			if height-this.currentHeight <= config.HECO_USEFUL_BLOCK_NUM {
+			if height-this.currentHeight <= this.config.HecoConfig.BlockConfig {
 				continue
 			}
 			log.Infof("MonitorChain - heco height is %d", height)
 			blockHandleResult = true
-			for this.currentHeight < height-config.HECO_USEFUL_BLOCK_NUM {
+			for this.currentHeight < height-this.config.HecoConfig.BlockConfig {
 				if this.currentHeight%10 == 0 {
 					log.Infof("handle new heco Block height: %d", this.currentHeight)
 				}
@@ -196,6 +220,7 @@ func (this *HecoManager) MonitorHecoChain() {
 		}
 	}
 }
+
 func (this *HecoManager) init() error {
 	// get latest height
 	latestHeight := this.findLastestHeight()
@@ -205,7 +230,11 @@ func (this *HecoManager) init() error {
 	if this.forceHeight > 0 && this.forceHeight < latestHeight {
 		this.currentHeight = this.forceHeight
 	} else {
-		this.currentHeight = latestHeight
+		if latestHeight > this.config.HecoConfig.BlockConfig {
+			this.currentHeight = latestHeight - this.config.HecoConfig.BlockConfig
+		} else {
+			this.currentHeight = latestHeight
+		}
 	}
 	log.Infof("HecoManager init - start height: %d", this.currentHeight)
 	return nil
@@ -232,20 +261,25 @@ func (this *HecoManager) findLastestHeight() uint64 {
 func (this *HecoManager) CheckIfCommitedToPolyAndParseLockDepositEvent(height uint64) bool {
 	ret := this.handleBlockHeader(height)
 	if !ret {
-		log.Errorf("handleNewBlock - handleBlockHeader on height :%d failed", height)
+		log.Warnf("handleNewBlock - handleBlockHeader on height :%d failed, retrying", height)
 		return false
 	}
-	ret = this.fetchLockDepositEvents(height, this.client)
-	if !ret {
-		log.Errorf("handleNewBlock - fetchLockDepositEvents on height :%d failed", height)
+	for {
+		ret = this.fetchLockDepositEvents(height, this.client)
+		if !ret {
+			log.Errorf("handleNewBlock - fetchLockDepositEvents on height :%d failed", height)
+			continue
+		}
+		break
 	}
+
 	return true
 }
 
 func (this *HecoManager) handleBlockHeader(height uint64) bool {
 	hdr, err := this.client.HeaderByNumber(context.Background(), big.NewInt(int64(height)))
 	if err != nil {
-		log.Errorf("handleBlockHeader - GetNodeHeader on height :%d failed", height)
+		log.Warnf("handleBlockHeader - GetNodeHeader on height :%d failed, retrying", height)
 		return false
 	}
 	rawHdr, _ := hdr.MarshalJSON()
@@ -253,6 +287,7 @@ func (this *HecoManager) handleBlockHeader(height uint64) bool {
 		append(append([]byte(scom.MAIN_CHAIN), autils.GetUint64Bytes(this.config.HecoConfig.SideChainId)...), autils.GetUint64Bytes(height)...))
 	if len(raw) == 0 || !bytes.Equal(raw, hdr.Hash().Bytes()) {
 		this.header4sync = append(this.header4sync, rawHdr)
+		//log.Infof("rawHeader height: %d", hdr.Number)
 	}
 	return true
 }
@@ -305,8 +340,24 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 				continue
 			}
 		}
+
+		// Filter skipped senders
+		_, skipped := this.skippedSenders[evt.Sender]
+		if skipped {
+			log.Infof("Skipped cross chain sender %s", evt.Sender)
+			continue
+		}
+
 		param := &common2.MakeTxParam{}
-		_ = param.Deserialization(common.NewZeroCopySource([]byte(evt.Rawdata)))
+		err = param.Deserialization(common.NewZeroCopySource([]byte(evt.Rawdata)))
+		if err != nil {
+			log.Errorf("param.Deserialization error %v", err)
+			continue
+		}
+		if !METHODS[param.Method] {
+			log.Errorf("target contract method invalid %s %s", param.Method, string(evt.Raw.TxHash.Bytes()))
+			continue
+		}
 		raw, _ := this.polySdk.GetStorage(autils.CrossChainManagerContractAddress.ToHexString(),
 			append(append([]byte(cross_chain_manager.DONE_TX), autils.GetUint64Bytes(this.config.HecoConfig.SideChainId)...), param.CrossChainID...))
 		if len(raw) != 0 {
@@ -335,6 +386,7 @@ func (this *HecoManager) fetchLockDepositEvents(height uint64, client *ethclient
 }
 
 func (this *HecoManager) commitHecoHeaderToPoly() int {
+	start := time.Now()
 	tx, err := this.polySdk.Native.Hs.SyncBlockHeader(
 		this.config.HecoConfig.SideChainId,
 		this.polySigner.Address,
@@ -343,7 +395,7 @@ func (this *HecoManager) commitHecoHeaderToPoly() int {
 	)
 	if err != nil {
 		errDesc := err.Error()
-		if strings.Contains(errDesc, "get the parent block failed") || strings.Contains(errDesc, "missing required field") {
+		if strings.Contains(errDesc, "parent header not exist") || strings.Contains(errDesc, "missing required field") {
 			log.Warnf("commitHeader - send transaction to poly chain err: %s", errDesc)
 			this.rollBackToCommAncestor()
 			return 0
@@ -352,20 +404,16 @@ func (this *HecoManager) commitHecoHeaderToPoly() int {
 			return 1
 		}
 	}
-	timeOutCount := 0
-	tick := time.NewTicker(100 * time.Millisecond)
+
 	var h uint32
-	for range tick.C {
+	for {
 		h, _ = this.polySdk.GetBlockHeightByTxHash(tx.ToHexString())
 		curr, _ := this.polySdk.GetCurrentBlockHeight()
 		if h > 0 && curr > h {
 			break
 		}
-		timeOutCount++
-		if timeOutCount > 1000 {
-			log.Errorf("commitHeader, GetBlockHeightByHash(tx:%s) timeout, alert", tx.ToHexString())
-			break
-		}
+		log.Infof("HecoManager SyncBlockHeader wait duration %s", time.Now().Sub(start).String())
+		time.Sleep(time.Second)
 	}
 	log.Infof("commitHeader - send transaction %s to poly chain and confirmed on height %d", tx.ToHexString(), h)
 	this.header4sync = make([][]byte, 0)
@@ -404,6 +452,10 @@ func (this *HecoManager) RegularlyTryCommitHecoLockProofToPoly() {
 				continue
 			}
 			snycheight := this.findLastestHeight()
+			if height < snycheight {
+				log.Warnf("heco node latest height: %d lower than poly synced height: %d, retry fetch heco node height", height, snycheight)
+				continue
+			}
 			log.Log.Info("MonitorDeposit from heco - snyced heco height", snycheight, "heco height", height, "diff", height-snycheight)
 			this.handleCachedLockDepositEvents(snycheight)
 		case <-this.exitChan:
@@ -417,7 +469,7 @@ func (this *HecoManager) handleCachedLockDepositEvents(refHeight uint64) error {
 		return fmt.Errorf("handleLockDepositEvents - this.db.GetAllRetry error: %s", err)
 	}
 	for _, v := range retryList {
-		time.Sleep(time.Second * 1)
+		// time.Sleep(time.Second * 1)
 		crosstx := new(CrossTransfer)
 		err := crosstx.Deserialization(common.NewZeroCopySource(v))
 		if err != nil {
@@ -431,10 +483,10 @@ func (this *HecoManager) handleCachedLockDepositEvents(refHeight uint64) error {
 			log.Errorf("handleCachedLockDepositEvents - MappingKeyAt error:%s\n", err.Error())
 			continue
 		}
-		if refHeight <= crosstx.height+this.config.HecoConfig.BlockConfig {
+		if refHeight <= crosstx.height+this.config.HecoConfig.CommitProofBlockConfig {
 			continue
 		}
-		height := int64(refHeight - this.config.HecoConfig.BlockConfig)
+		height := int64(refHeight - this.config.HecoConfig.CommitProofBlockConfig)
 		heightHex := hexutil.EncodeBig(big.NewInt(height))
 		proofKey := hexutil.Encode(keyBytes)
 		//2. get proof
@@ -502,6 +554,7 @@ func (this *HecoManager) parserValue(value []byte) []byte {
 }
 func (this *HecoManager) CheckDeposit() {
 	checkTicker := time.NewTicker(time.Duration(this.config.HecoConfig.MonitorInterval) * time.Second)
+	defer checkTicker.Stop()
 	for {
 		select {
 		case <-checkTicker.C:

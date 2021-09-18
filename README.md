@@ -66,6 +66,8 @@ Before running, you need feed the configuration file `config.json`.
     }
   ]
 }
+
+vi 
 ```
 
 After that, make sure you already have a heco(ethereum) wallet with HT on huobi eco chain. The wallet file is like `UTC--2020-08-17T03-44-00.191825735Z--0xd12e...54ccacf91ca364d` and you can use [geth](https://github.com/ethereum/go-ethereum) to create one( `./geth accounts add` ). Put it under `KeyStorePath`. You can create more than one wallet for relayer. Relayer will send transactions concurrently by different accounts.

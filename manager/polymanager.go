@@ -22,6 +22,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"math/rand"
+	"poly_bridge_sdk"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	ethcommon "github.com/ethereum/go-ethereum/common"
@@ -38,24 +45,98 @@ import (
 	sdk "github.com/polynetwork/poly-go-sdk"
 	"github.com/polynetwork/poly/common"
 	"github.com/polynetwork/poly/common/password"
-	"github.com/polynetwork/poly/consensus/vbft/config"
+	vconfig "github.com/polynetwork/poly/consensus/vbft/config"
 	common2 "github.com/polynetwork/poly/native/service/cross_chain_manager/common"
-	"math/rand"
-	"strconv"
-	"strings"
-
-	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/polynetwork/heco_relayer/tools"
-
 	polytypes "github.com/polynetwork/poly/core/types"
 )
 
 const (
-	ChanLen = 64
+	ChanLen = 1
 )
+const (
+	FEE_NOCHECK = iota
+	FEE_HASPAY
+	FEE_NOTPAY
+)
+
+type BridgeTransaction struct {
+	header       *polytypes.Header
+	param        *common2.ToMerkleValue
+	headerProof  string
+	anchorHeader *polytypes.Header
+	polyTxHash   string
+	rawAuditPath []byte
+	hasPay       uint8
+	fee          string
+}
+
+func CheckGasLimit(hash string, limit uint64) error {
+	if limit > 300000 {
+		return fmt.Errorf("Skipping poly tx %s for gas limit too high %d ", hash, limit)
+	}
+	return nil
+}
+
+func (this *BridgeTransaction) Serialization(sink *common.ZeroCopySink) {
+	this.header.Serialization(sink)
+	this.param.Serialization(sink)
+	if this.headerProof != "" && this.anchorHeader != nil {
+		sink.WriteUint8(1)
+		sink.WriteString(this.headerProof)
+		this.anchorHeader.Serialization(sink)
+	} else {
+		sink.WriteUint8(0)
+	}
+	sink.WriteString(this.polyTxHash)
+	sink.WriteVarBytes(this.rawAuditPath)
+	sink.WriteUint8(this.hasPay)
+	sink.WriteString(this.fee)
+}
+
+func (this *BridgeTransaction) Deserialization(source *common.ZeroCopySource) error {
+	this.header = new(polytypes.Header)
+	err := this.header.Deserialization(source)
+	if err != nil {
+		return err
+	}
+	this.param = new(common2.ToMerkleValue)
+	err = this.param.Deserialization(source)
+	if err != nil {
+		return err
+	}
+	anchor, eof := source.NextUint8()
+	if eof {
+		return fmt.Errorf("Waiting deserialize anchor error")
+	}
+	if anchor == 1 {
+		this.headerProof, eof = source.NextString()
+		if eof {
+			return fmt.Errorf("Waiting deserialize header proof error")
+		}
+		this.anchorHeader = new(polytypes.Header)
+		this.anchorHeader.Deserialization(source)
+	}
+	this.polyTxHash, eof = source.NextString()
+	if eof {
+		return fmt.Errorf("Waiting deserialize poly tx hash error")
+	}
+	this.rawAuditPath, eof = source.NextVarBytes()
+	if eof {
+		return fmt.Errorf("Waiting deserialize poly tx hash error")
+	}
+	this.hasPay, eof = source.NextUint8()
+	if eof {
+		return fmt.Errorf("Waiting deserialize has pay error")
+	}
+	this.fee, eof = source.NextString()
+	if eof {
+		return fmt.Errorf("Waiting deserialize fee error")
+	}
+	return nil
+}
 
 type PolyManager struct {
 	config        *config.ServiceConfig
@@ -66,6 +147,8 @@ type PolyManager struct {
 	db            *db.BoltDB
 	ethClient     *ethclient.Client
 	senders       []*EthSender
+	bridgeSdk     *poly_bridge_sdk.BridgeFeeCheck
+	eccdInstance  *eccd_abi.EthCrossChainData
 }
 
 func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, polySdk *sdk.PolySdk, ethereumsdk *ethclient.Client, boltDB *db.BoltDB) (*PolyManager, error) {
@@ -110,6 +193,13 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 
 		senders[i] = v
 	}
+	bridgeSdk := poly_bridge_sdk.NewBridgeFeeCheck(servCfg.BridgeUrl, 5)
+	address := ethcommon.HexToAddress(servCfg.HecoConfig.ECCDContractAddress)
+	instance, err := eccd_abi.NewEthCrossChainData(address, ethereumsdk)
+	if err != nil {
+		log.Errorf("NewPolyManager - new eth cross chain failed: %s", err.Error())
+		return nil, fmt.Errorf("new eccd instance from abi error")
+	}
 	return &PolyManager{
 		exitChan:      make(chan int),
 		config:        servCfg,
@@ -119,17 +209,13 @@ func NewPolyManager(servCfg *config.ServiceConfig, startblockHeight uint32, poly
 		db:            boltDB,
 		ethClient:     ethereumsdk,
 		senders:       senders,
+		bridgeSdk:     bridgeSdk,
+		eccdInstance:  instance,
 	}, nil
 }
 
 func (this *PolyManager) findLatestHeight() uint32 {
-	address := ethcommon.HexToAddress(this.config.HecoConfig.ECCDContractAddress)
-	instance, err := eccd_abi.NewEthCrossChainData(address, this.ethClient)
-	if err != nil {
-		log.Errorf("findLatestHeight - new eth cross chain failed: %s", err.Error())
-		return 0
-	}
-	height, err := instance.GetCurEpochStartHeight(nil)
+	height, err := this.eccdInstance.GetCurEpochStartHeight(nil)
 	if err != nil {
 		log.Errorf("findLatestHeight - GetLatestHeight failed: %s", err.Error())
 		return 0
@@ -184,6 +270,9 @@ func (this *PolyManager) MonitorPolyChain() {
 					break
 				}
 				this.currentHeight++
+				if this.currentHeight%1000 == 0 {
+					break
+				}
 			}
 			if err = this.db.UpdatePolyHeight(this.currentHeight - 1); err != nil {
 				log.Errorf("MonitorChain - failed to save height of poly: %v", err)
@@ -290,6 +379,10 @@ func (this *PolyManager) handleDepositEvents(height uint32) bool {
 					log.Errorf("handleDepositEvents - failed to deserialize MakeTxParam (value: %x, err: %v)", value, err)
 					continue
 				}
+				if !METHODS[param.MakeTxParam.Method] {
+					log.Errorf("Invalid target contract method %s %s", param.MakeTxParam.Method, event.TxHash)
+					continue
+				}
 				var isTarget bool
 				if len(this.config.TargetContracts) > 0 {
 					toContractStr := ethcommon.BytesToAddress(param.MakeTxParam.ToContractAddress).String()
@@ -316,11 +409,24 @@ func (this *PolyManager) handleDepositEvents(height uint32) bool {
 					}
 				}
 				cnt++
-				sender := this.selectSender()
-				log.Infof("sender %s is handling poly tx ( hash: %s, height: %d )",
-					sender.acc.Address.String(), event.TxHash, height)
-				// temporarily ignore the error for tx
-				sender.commitDepositEventsWithHeader(hdr, param, hp, anchor, event.TxHash, auditpath)
+				//sender := this.selectSender()
+				//log.Infof("sender %s is handling poly tx ( hash: %s, height: %d )",
+				//	sender.acc.Address.String(), event.TxHash, height)
+				//// temporarily ignore the error for tx
+				//sender.commitDepositEventsWithHeader(hdr, param, hp, anchor, event.TxHash, auditpath)
+				bridgeTransaction := &BridgeTransaction{
+					header:       hdr,
+					param:        param,
+					headerProof:  hp,
+					anchorHeader: anchor,
+					polyTxHash:   event.TxHash,
+					rawAuditPath: auditpath,
+					hasPay:       FEE_NOCHECK,
+					fee:          "",
+				}
+				sink := common.NewZeroCopySink(nil)
+				bridgeTransaction.Serialization(sink)
+				this.db.PutBridgeTransactions(hex.EncodeToString(param.MakeTxParam.TxHash), sink.Bytes())
 				//if !sender.commitDepositEventsWithHeader(hdr, param, hp, anchor, event.TxHash, auditpath) {
 				//	return false
 				//}
@@ -359,6 +465,117 @@ func (this *PolyManager) selectSender() *EthSender {
 	return this.senders[0]
 }
 
+func (this *PolyManager) MonitorDeposit() {
+	monitorTicker := time.NewTicker(time.Duration(this.config.HecoConfig.MonitorInterval) * time.Second)
+	for {
+		select {
+		case <-monitorTicker.C:
+			this.handleLockDepositEvents()
+		case <-this.exitChan:
+			return
+		}
+	}
+}
+
+func (this *PolyManager) handleLockDepositEvents() error {
+	retryList, err := this.db.GetAllBridgeTransactions()
+	if err != nil {
+		return fmt.Errorf("handleLockDepositEvents - this.db.GetAllBridgeTransactions error: %s", err)
+	}
+	if len(retryList) == 0 {
+		return nil
+	}
+	bridgeTransactions := make(map[string]*BridgeTransaction, 0)
+	for k, v := range retryList {
+		bridgeTransaction := new(BridgeTransaction)
+		err := bridgeTransaction.Deserialization(common.NewZeroCopySource(v))
+		if err != nil {
+			log.Errorf("handleLockDepositEvents - retry.Deserialization error: %s", err)
+			continue
+		}
+		bridgeTransactions[k] = bridgeTransaction
+	}
+	noCheckFees := make([]*poly_bridge_sdk.CheckFeeReq, 0)
+	for k, v := range bridgeTransactions {
+		if v.hasPay == FEE_NOCHECK {
+			noCheckFees = append(noCheckFees, &poly_bridge_sdk.CheckFeeReq{
+				ChainId: v.param.FromChainID,
+				Hash:    k,
+			})
+		}
+	}
+	if len(noCheckFees) > 0 {
+		checkFees, err := this.checkFee(noCheckFees)
+		if err != nil {
+			log.Errorf("handleLockDepositEvents - checkFee error: %s", err)
+		}
+		if checkFees != nil {
+			for _, checkFee := range checkFees {
+				if checkFee.Error != "" {
+					log.Errorf("check fee err: %s", checkFee.Error)
+					continue
+				}
+				//checkFee.PayState = FEE_NOTPAY
+				item, ok := bridgeTransactions[checkFee.Hash]
+				if ok {
+					if checkFee.PayState == poly_bridge_sdk.STATE_HASPAY {
+						log.Infof("tx(%d,%s) has payed fee", checkFee.ChainId, checkFee.Hash)
+						item.hasPay = FEE_HASPAY
+						item.fee = checkFee.Amount
+					} else if checkFee.PayState == poly_bridge_sdk.STATE_NOTPAY {
+						log.Infof("tx(%d,%s) has not payed fee", checkFee.ChainId, checkFee.Hash)
+						item.hasPay = FEE_NOTPAY
+					} else {
+						log.Errorf("check fee of tx(%d,%s) failed", checkFee.ChainId, checkFee.Hash)
+					}
+				}
+			}
+		}
+	}
+	for k, v := range bridgeTransactions {
+		if v.hasPay == FEE_NOTPAY {
+			this.db.DeleteBridgeTransactions(k)
+			log.Infof("tx (src %d, %s, poly %s) has not pay proxy fee, ignore it, payed: %s",
+				v.param.FromChainID, hex.EncodeToString(v.param.MakeTxParam.TxHash), v.polyTxHash, v.fee)
+			delete(bridgeTransactions, k)
+		}
+	}
+	var maxFeeOfTransaction *BridgeTransaction = nil
+	maxFee := new(big.Float).SetUint64(0)
+	maxFeeOfTxHash := ""
+	for k, v := range bridgeTransactions {
+		fee, ok := new(big.Float).SetString(v.fee)
+		if ok != true {
+			continue
+		}
+		if v.hasPay == FEE_HASPAY || fee.Cmp(maxFee) > 0 {
+			maxFee = fee
+			maxFeeOfTransaction = v
+			maxFeeOfTxHash = k
+		}
+	}
+	if maxFeeOfTransaction != nil {
+		sender := this.selectSender()
+		log.Infof("sender %s is handling poly tx ( hash: %x)", sender.acc.Address.String(), maxFeeOfTransaction.param.TxHash)
+		res := sender.commitDepositEventsWithHeader(maxFeeOfTransaction.header, maxFeeOfTransaction.param, maxFeeOfTransaction.headerProof,
+			maxFeeOfTransaction.anchorHeader, hex.EncodeToString(maxFeeOfTransaction.param.TxHash), maxFeeOfTransaction.rawAuditPath)
+		if res == true {
+			this.db.DeleteBridgeTransactions(maxFeeOfTxHash)
+			delete(bridgeTransactions, maxFeeOfTxHash)
+		}
+	}
+	for k, v := range bridgeTransactions {
+		sink := common.NewZeroCopySink(nil)
+		v.Serialization(sink)
+		this.db.PutBridgeTransactions(k, sink.Bytes())
+	}
+	return nil
+}
+
+func (this *PolyManager) checkFee(checks []*poly_bridge_sdk.CheckFeeReq) ([]*poly_bridge_sdk.CheckFeeRsp, error) {
+	return this.bridgeSdk.CheckFee(checks)
+}
+
 func (this *PolyManager) Stop() {
 	this.exitChan <- 1
 	close(this.exitChan)
@@ -384,22 +601,29 @@ func (this *EthSender) sendTxToEth(info *EthTxInfo) error {
 		this.nonceManager.ReturnNonce(this.acc.Address, nonce)
 		return fmt.Errorf("commitDepositEventsWithHeader - sign raw tx error and return nonce %d: %v", nonce, err)
 	}
-	err = this.ethClient.SendTransaction(context.Background(), signedtx)
-	if err != nil {
-		this.nonceManager.ReturnNonce(this.acc.Address, nonce)
-		return fmt.Errorf("commitDepositEventsWithHeader - send transaction error and return nonce %d: %v", nonce, err)
-	}
-	hash := signedtx.Hash()
 
-	isSuccess := this.waitTransactionConfirm(info.polyTxHash, hash)
-	if isSuccess {
-		log.Infof("successful to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
-			hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
-	} else {
+	for {
+		err = this.ethClient.SendTransaction(context.Background(), signedtx)
+		if err != nil {
+			log.Errorf("poly to heco SendTransaction error: %v, nonce %d", err, nonce)
+			time.Sleep(time.Second)
+			continue
+		}
+		hash := signedtx.Hash()
+
+		isSuccess := this.waitTransactionConfirm(info.polyTxHash, hash)
+		if isSuccess {
+			log.Infof("successful to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
+				hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
+			return nil
+		}
+
 		log.Errorf("failed to relay tx to huobi_eco: (heco_hash: %s, nonce: %d, poly_hash: %s, heco_explorer: %s)",
 			hash.String(), nonce, info.polyTxHash, tools.GetExplorerUrl(this.keyStore.GetChainId())+hash.String())
+
+		return nil
 	}
-	return nil
+
 }
 
 func (this *EthSender) commitDepositEventsWithHeader(header *polytypes.Header, param *common2.ToMerkleValue, headerProof string, anchorHeader *polytypes.Header, polyTxHash string, rawAuditPath []byte) bool {
@@ -464,6 +688,13 @@ func (this *EthSender) commitDepositEventsWithHeader(header *polytypes.Header, p
 	if err != nil {
 		log.Errorf("commitDepositEventsWithHeader - estimate gas limit error: %s", err.Error())
 		return false
+	}
+
+	// Check gas limit
+	gasLimit = uint64(float32(gasLimit) * 1.1)
+	if e := CheckGasLimit(polyTxHash, gasLimit); e != nil {
+		log.Errorf("Skipped poly tx %s for gas limit too high %v", polyTxHash, gasLimit)
+		return true
 	}
 
 	k := this.getRouter()
@@ -566,7 +797,11 @@ func (this *EthSender) Balance() (*big.Int, error) {
 
 // TODO: check the status of tx
 func (this *EthSender) waitTransactionConfirm(polyTxHash string, hash ethcommon.Hash) bool {
+	start := time.Now()
 	for {
+		if time.Now().After(start.Add(time.Minute * 5)) {
+			return false
+		}
 		time.Sleep(time.Second * 1)
 		_, ispending, err := this.ethClient.TransactionByHash(context.Background(), hash)
 		if err != nil {

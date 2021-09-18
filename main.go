@@ -26,6 +26,8 @@ import (
 	"github.com/polynetwork/heco_relayer/manager"
 	sdk "github.com/polynetwork/poly-go-sdk"
 	"github.com/urfave/cli"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -118,6 +120,10 @@ func startServer(ctx *cli.Context) {
 
 	initPolyServer(servConfig, polySdk, ethereumsdk, boltDB)
 	initHecoServer(servConfig, polySdk, ethereumsdk, boltDB)
+
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
 	waitToExit()
 }
 
@@ -163,6 +169,7 @@ func initPolyServer(servConfig *config.ServiceConfig, polysdk *sdk.PolySdk, ethe
 		return
 	}
 	go mgr.MonitorPolyChain()
+	go mgr.MonitorDeposit()
 }
 
 func main() {

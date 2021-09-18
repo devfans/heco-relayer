@@ -18,12 +18,13 @@ package tools
 
 import (
 	"context"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/polynetwork/heco_relayer/log"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/polynetwork/heco_relayer/log"
 )
 
 const clear_nonce_interval = 10 * time.Minute
@@ -60,7 +61,7 @@ func (this *NonceManager) GetAddressNonce(address common.Address) uint64 {
 	nonce, ok := this.addressNonce[address]
 	if !ok {
 		// get nonce from eth network
-		uintNonce, err := this.ethClient.PendingNonceAt(context.Background(), address)
+		uintNonce, err := this.ethClient.NonceAt(context.Background(), address, nil)
 		if err != nil {
 			log.Errorf("GetAddressNonce: cannot get account %s nonce, err: %s, set it to nil!",
 				address, err)
