@@ -510,18 +510,23 @@ func (this *PolyManager) handleLockDepositEvents() error {
 			log.Errorf("handleLockDepositEvents - checkFee error: %s", err)
 		}
 		if checkFees != nil {
-			for _, checkfee := range checkFees {
-				if checkfee.Error != "" {
+			for _, checkFee := range checkFees {
+				if checkFee.Error != "" {
+					log.Errorf("check fee err: %s", checkFee.Error)
 					continue
 				}
-				checkfee.PayState = FEE_NOTPAY
-				item, ok := bridgeTransactions[checkfee.Hash]
+				//checkFee.PayState = FEE_NOTPAY
+				item, ok := bridgeTransactions[checkFee.Hash]
 				if ok {
-					if checkfee.PayState == poly_bridge_sdk.STATE_HASPAY {
+					if checkFee.PayState == poly_bridge_sdk.STATE_HASPAY {
+						log.Infof("tx(%d,%s) has payed fee", checkFee.ChainId, checkFee.Hash)
 						item.hasPay = FEE_HASPAY
-						item.fee = checkfee.Amount
-					} else if checkfee.PayState == poly_bridge_sdk.STATE_NOTPAY {
+						item.fee = checkFee.Amount
+					} else if checkFee.PayState == poly_bridge_sdk.STATE_NOTPAY {
+						log.Infof("tx(%d,%s) has not payed fee", checkFee.ChainId, checkFee.Hash)
 						item.hasPay = FEE_NOTPAY
+					} else {
+						log.Errorf("check fee of tx(%d,%s) failed", checkFee.ChainId, checkFee.Hash)
 					}
 				}
 			}
