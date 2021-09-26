@@ -73,6 +73,13 @@ type BridgeTransaction struct {
 	fee          string
 }
 
+func CheckGasLimit(hash string, limit uint64) error {
+	if limit > 300000 {
+		return fmt.Errorf("Skipping poly tx %s for gas limit too high %d ", hash, limit)
+	}
+	return nil
+}
+
 func (this *BridgeTransaction) Serialization(sink *common.ZeroCopySink) {
 	this.header.Serialization(sink)
 	this.param.Serialization(sink)
@@ -372,8 +379,8 @@ func (this *PolyManager) handleDepositEvents(height uint32) bool {
 					log.Errorf("handleDepositEvents - failed to deserialize MakeTxParam (value: %x, err: %v)", value, err)
 					continue
 				}
-				if param.MakeTxParam.Method != "unlock" {
-					log.Errorf("Invalid target contract method %s", param.MakeTxParam.Method)
+				if !METHODS[param.MakeTxParam.Method] {
+					log.Errorf("Invalid target contract method %s %s", param.MakeTxParam.Method, event.TxHash)
 					continue
 				}
 				var isTarget bool
@@ -503,18 +510,23 @@ func (this *PolyManager) handleLockDepositEvents() error {
 			log.Errorf("handleLockDepositEvents - checkFee error: %s", err)
 		}
 		if checkFees != nil {
-			for _, checkfee := range checkFees {
-				if checkfee.Error != "" {
+			for _, checkFee := range checkFees {
+				if checkFee.Error != "" {
+					log.Errorf("check fee err: %s", checkFee.Error)
 					continue
 				}
-				checkfee.PayState = FEE_NOTPAY
-				item, ok := bridgeTransactions[checkfee.Hash]
+				//checkFee.PayState = FEE_NOTPAY
+				item, ok := bridgeTransactions[checkFee.Hash]
 				if ok {
-					if checkfee.PayState == poly_bridge_sdk.STATE_HASPAY {
+					if checkFee.PayState == poly_bridge_sdk.STATE_HASPAY {
+						log.Infof("tx(%d,%s) has payed fee", checkFee.ChainId, checkFee.Hash)
 						item.hasPay = FEE_HASPAY
-						item.fee = checkfee.Amount
-					} else if checkfee.PayState == poly_bridge_sdk.STATE_NOTPAY {
+						item.fee = checkFee.Amount
+					} else if checkFee.PayState == poly_bridge_sdk.STATE_NOTPAY {
+						log.Infof("tx(%d,%s) has not payed fee", checkFee.ChainId, checkFee.Hash)
 						item.hasPay = FEE_NOTPAY
+					} else {
+						log.Errorf("check fee of tx(%d,%s) failed", checkFee.ChainId, checkFee.Hash)
 					}
 				}
 			}
@@ -676,6 +688,13 @@ func (this *EthSender) commitDepositEventsWithHeader(header *polytypes.Header, p
 	if err != nil {
 		log.Errorf("commitDepositEventsWithHeader - estimate gas limit error: %s", err.Error())
 		return false
+	}
+
+	// Check gas limit
+	gasLimit = uint64(float32(gasLimit) * 1.1)
+	if e := CheckGasLimit(polyTxHash, gasLimit); e != nil {
+		log.Errorf("Skipped poly tx %s for gas limit too high %v", polyTxHash, gasLimit)
+		return true
 	}
 
 	k := this.getRouter()
