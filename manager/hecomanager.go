@@ -259,13 +259,14 @@ func (this *HecoManager) findLastestHeight() uint64 {
 }
 
 func (this *HecoManager) CheckIfCommitedToPolyAndParseLockDepositEvent(height uint64) bool {
-	ret := this.handleBlockHeader(height)
+	/*ret := this.handleBlockHeader(height)
 	if !ret {
 		log.Warnf("handleNewBlock - handleBlockHeader on height :%d failed, retrying", height)
 		return false
 	}
+	*/
 	for {
-		ret = this.fetchLockDepositEvents(height, this.client)
+		ret := this.fetchLockDepositEvents(height, this.client)
 		if !ret {
 			log.Errorf("handleNewBlock - fetchLockDepositEvents on height :%d failed", height)
 			continue

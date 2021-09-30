@@ -62,6 +62,8 @@ const (
 	FEE_NOTPAY
 )
 
+const MaxGasLimit = uint64(350000)
+
 type BridgeTransaction struct {
 	header       *polytypes.Header
 	param        *common2.ToMerkleValue
@@ -74,7 +76,7 @@ type BridgeTransaction struct {
 }
 
 func CheckGasLimit(hash string, limit uint64) error {
-	if limit > 300000 {
+	if limit > MaxGasLimit {
 		return fmt.Errorf("Skipping poly tx %s for gas limit too high %d ", hash, limit)
 	}
 	return nil
